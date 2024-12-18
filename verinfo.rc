@@ -1,0 +1,27 @@
+
+1 VERSIONINFO
+FILEVERSION 1,0,6,0
+PRODUCTVERSION 1,0,5,0
+FILEOS 0x4
+FILETYPE 0x1
+{
+BLOCK "StringFileInfo"
+{
+	BLOCK "041103A4"
+	{
+    VALUE "Comments", "Compiled by Lazarus 3.2"
+    VALUE "CompanyName", ""
+    VALUE "FileDescription", "フリーソフトです"
+		VALUE "FileVersion", "1.0.6.0"
+		VALUE "LegalCopyright", "INOUE, masahiro"
+		VALUE "OriginalFilename", "hamelndl.exe"
+		VALUE "ProductName", "ハーメルンテキストダウンローダー"
+		VALUE "ProductVersion", "1.0"
+	}
+}
+
+BLOCK "VarFileInfo"
+{
+	VALUE "Translation", 0x0411 0x03A4  
+}
+}
