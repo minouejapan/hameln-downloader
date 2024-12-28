@@ -1,6 +1,8 @@
 ﻿(*
   ハーメルン小説ダウンローダー[hamelndl]
 
+  1.0.7 2024/12/29  <style><script>タグ除去を追加した
+                    行の先頭から全角空白が10個以上連続する場合、それらの空白を削除するようにした
   1.0.6 2024/12/19  ver1.0正式版リリース用にソースコードを再整理した
                     各話URL取得部分の検出タグを修正した
   1.0.5 2024/12/17  本文中の文字装飾タグ除去が不十分だった不具合を修正した
@@ -53,7 +55,7 @@ uses
 
 const
   // バージョン
-  VERSION  = 'ver1.06 2024/12/19';
+  VERSION  = 'ver1.07 2024/12/29';
   // データ抽出用の識別タグ(正規表現バージョン)
   // トップページ
   STITLE   = '<span .*?itemprop="name">.*?</span>';                                 // タイトル
@@ -253,6 +255,10 @@ begin
     UTF8Insert(AO_EMB + tmp + AO_EME, Base, RegEx.MatchPos[0]);  // 変換後の文字列を挿入
     RegEx.InputString := Base;
   end;
+  // 本文中の余計なタグを除去する
+  Base := ReplaceRegExpr('<style>.*?</style>', Base, '');
+  Base := ReplaceRegExpr('<script>.*?</script>', Base, '');
+
   Result := Base;
 end;
 
@@ -419,8 +425,9 @@ end;
 // 小説本文をHTMLから抜き出して整形する
 function ParsePage(Page: string): Boolean;
 var
-  sp: integer;
+  sp, i: integer;
   header, footer, chapt, sect, body: string;
+  lines: TStringList;
 begin
   Result := True;
   // タイトル部分までのヘッダー要素を除去する
@@ -477,6 +484,26 @@ begin
     body := ReplaceRegExpr('<p id=".*?">', body, '');  // 各行を整形
     body := ReplaceRegExpr('</p>', body, #13#10);
     body := ProcTags(body);
+    // 全角空白が64個以上連続していた場合はダミーと判断して全て除去する
+    lines := TStringList.Create;
+    try
+      lines.Text := body;
+      RegEx.Expression := '　*';
+      for i := 0 to lines.Count - 1 do
+      begin
+        RegEx.InputString := lines.Strings[i];
+        if RegEx.Exec then
+        begin
+          if (RegEx.MatchPos[0] = 1) and (RegEx.MatchLen[0] > 10) then
+          begin
+            lines.Strings[i] := ReplaceRegExpr('　*', lines.Strings[i], '');
+          end;
+        end;
+      end;
+      body := lines.Text;
+    finally
+      lines.Free;
+    end;
     UTF8Delete(Page, 1, RegEx.MatchPos[0] + RegEx.MatchLen[0] - 1);
   end else
     Result := False;
