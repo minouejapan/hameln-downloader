@@ -1,6 +1,8 @@
 ﻿(*
   ハーメルン小説ダウンローダー[hamelndl]
 
+  1.1.0 2025/02/01  本文が完全に取得出来ない場合があった不具合を修正した
+                    文字コードにエスケープされた文字を戻せない場合があった不具合を修正した
   1.0.7 2024/12/29  <style><script>タグ除去を追加した
                     行の先頭から全角空白が10個以上連続する場合、それらの空白を削除するようにした
   1.0.6 2024/12/19  ver1.0正式版リリース用にソースコードを再整理した
@@ -55,7 +57,7 @@ uses
 
 const
   // バージョン
-  VERSION  = 'ver1.07 2024/12/29';
+  VERSION  = 'ver1.1 2025/2/1';
   // データ抽出用の識別タグ(正規表現バージョン)
   // トップページ
   STITLE   = '<span .*?itemprop="name">.*?</span>';                                 // タイトル
@@ -112,6 +114,8 @@ const
   AO_KKL = '［＃ここから罫囲み］' ;     // 本来は罫囲み範囲の指定だが、前書きや後書き等を
   AO_KKR = '［＃ここで罫囲み終わり］';  // 一段小さい文字で表記するために使用する
   AO_END = '底本：';          // ページフッダ開始（必ずあるとは限らない）
+  AO_HR  = '［＃水平線］';    // 水平線<hr />
+  AO_HR2 = '［＃区切り線］';  // 区切り線
   AO_PIB = '［＃リンクの図（';          // 画像埋め込み
   AO_PIE = '）入る］';        // 画像埋め込み終わり
   AO_LIB = '［＃リンク（';          // 画像埋め込み
@@ -151,7 +155,8 @@ var
 begin
   Result   := '';
   // ハーメルンサイトのR18作品アクセス用Cookie
-  InternetSetCookie(PChar(URLadr), PChar('over18'), PChar('off'));
+  if not InternetSetCookie(PChar('https://syosetu.org'{URLadr}), PChar('over18'), PChar('off')) then
+    Writeln(#13#10'Cookieの設定に失敗しました.');
 
   hSession := InternetOpen('WinINet', INTERNET_OPEN_TYPE_PRECONFIG, nil, nil, 0);
 
@@ -223,18 +228,20 @@ function EliminateDeco(Base: string): string;
 var
   tmp: string;
 begin
-  RegEx.Expression  := '<span style=.*?>.*?</span>';  // 文字装飾
-  RegEx.InputString := Base;
-  while RegEx.Exec do
-  begin
-    tmp := RegEx.Match[0];
-    tmp := ReplaceRegExpr('<span style=.*?>', tmp, '');
-    tmp := ReplaceRegExpr('</span>', tmp, '');
-    UTF8Delete(Base, RegEx.MatchPos[0], RegEx.MatchLen[0]); // 装飾範囲の文字列を削除
-    UTF8Insert(tmp, Base, RegEx.MatchPos[0]);  // 変換後の文字列を挿入
-    RegEx.InputString := Base;
-  end;
-  Result := Base;
+  tmp := Base;
+  tmp := ReplaceRegExpr('<span .*?>', tmp, '');
+  tmp := ReplaceRegExpr('</span>', tmp, '');
+  tmp := ReplaceRegExpr('<div .*?>', tmp, '');
+  tmp := ReplaceRegExpr('</div>', tmp, '');
+  tmp := ReplaceRegExpr('<table .*?>', tmp, '');
+  tmp := ReplaceRegExpr('<th .*?>', tmp, '');
+  tmp := ReplaceRegExpr('<tr .*?>', tmp, '');
+  tmp := ReplaceRegExpr('<td .*?>', tmp, '');
+  tmp := ReplaceRegExpr('<tr>', tmp, '');
+  tmp := ReplaceRegExpr('</tr>', tmp, '');
+  tmp := ReplaceRegExpr('<hr>', tmp, AO_HR);
+
+  Result := tmp;//Base;
 end;
 
 // 本文の傍点を青空文庫形式に変換する
@@ -288,7 +295,7 @@ end;
 function Restore2RealChar(Base: string): string;
 var
   tmp, cd: string;
-  w: integer;
+  w, mp, ml: integer;
   ch: Char;
 begin
   // エスケープされた文字
@@ -307,8 +314,10 @@ begin
   if RegEx.Exec then
   begin
     repeat
-      UTF8Delete(tmp, RegEx.MatchPos[0], RegEx.MatchLen[0]);
       cd := RegEx.Match[0];
+      mp := RegEx.MatchPos[0];
+      ml := RegEx.MatchLen[0];
+      UTF8Delete(tmp, mp, ml);
       UTF8Delete(cd, 1, 2);           // &#を削除する
       UTF8Delete(cd, UTF8Length(cd), 1);  // 最後の;を削除する
       if cd[1] = 'x' then         // 先頭が16進数を表すxであればDelphiの16進数接頭文字$に変更する
@@ -319,8 +328,9 @@ begin
       except
         ch := '？';
       end;
-      UTF8Insert(ch, tmp, RegEx.MatchPos[0]);
-    until not RegEx.ExecNext;
+      UTF8Insert(ch, tmp, mp);
+      RegEx.InputString := tmp;
+    until not RegEx.Exec;
   end;
   Result := tmp;
 end;
@@ -347,9 +357,12 @@ end;
 // 本文のリンクタグを除去する
 function Delete_tags(Base: string): string;
 begin
-  Base := ReplaceRegExpr('<a href="', Base, '');
-  Base := ReplaceRegExpr('">', Base, '');
-  Base := ReplaceRegExpr('<.*?>', Base, '');
+  // リンクタグ
+  Base := ReplaceRegExpr('<a href=".*?">', Base, '');
+  Base := ReplaceRegExpr('</a>', Base, '');
+  // 行タグ
+  Base := ReplaceRegExpr('<p id=".*?">', Base, '');  // 各行を整形
+  Base := ReplaceRegExpr('</p>', Base, #13#10);
 
   Result := Base;
 end;
@@ -414,19 +427,21 @@ var
 begin
   tmp := ChangeAozoraTag(Str);
   tmp := ChangeBrk(tmp);
+  tmp := Delete_tags(tmp);
   tmp := EliminateDeco(tmp);
   tmp := ChangeBouten(tmp);
   tmp := Restore2RealChar(tmp);
   tmp := ChangeImage(tmp);
   tmp := ChangeRuby(tmp);
-  Result := Delete_tags(tmp);
+
+  Result := tmp;
 end;
 
 // 小説本文をHTMLから抜き出して整形する
 function ParsePage(Page: string): Boolean;
 var
   sp, i: integer;
-  header, footer, chapt, sect, body: string;
+  header, footer, chapt, sect, body, tmp: string;
   lines: TStringList;
 begin
   Result := True;
@@ -473,40 +488,47 @@ begin
     Result:= False;
   // 本文
   body := '';
-  RegEx.Expression  := SBODY;
   RegEx.InputString := Page;
+  // honbunタグと本文開始の<p id="0">の間に文章があれば抽出する
+  RegEx.Expression  := '<div id="honbun">.*?<p id="0">';
   if RegEx.Exec then
   begin
-    body := RegEx.Match[0];
-    body := ReplaceRegExpr('<div id="honbun">', body, '');
-    body := ReplaceRegExpr('</div>', body, '');
-    body := ChangeAozoraTag(body);
-    body := ReplaceRegExpr('<p id=".*?">', body, '');  // 各行を整形
-    body := ReplaceRegExpr('</p>', body, #13#10);
-    body := ProcTags(body);
-    // 全角空白が64個以上連続していた場合はダミーと判断して全て除去する
-    lines := TStringList.Create;
-    try
-      lines.Text := body;
-      RegEx.Expression := '　*';
-      for i := 0 to lines.Count - 1 do
+    tmp := RegEx.Match[0];
+    tmp := ReplaceRegExpr('<div id="honbun">', tmp, '');
+    tmp := ReplaceRegExpr('<p id="0">', tmp, '');
+    body := tmp;
+  end;
+  // 装飾用特殊タグで本文部分を誤認識しないように一行ずつちゅしゅつっする
+  RegEx.Expression  := '<p id="\d*?">.*?</p>';//SBODY;
+  while RegEx.Exec do
+  begin
+    body := body + RegEx.Match[0];
+    UTF8Delete(Page, 1, RegEx.MatchPos[0]);
+    RegEx.InputString := Page;
+  end;
+  body := ChangeAozoraTag(body);
+  body := ProcTags(body);
+  // 全角空白が64個以上連続していた場合はダミーと判断して全て除去する
+  lines := TStringList.Create;
+  try
+    lines.Text := body;
+    RegEx.Expression := '　*';
+    for i := 0 to lines.Count - 1 do
+    begin
+      RegEx.InputString := lines.Strings[i];
+      if RegEx.Exec then
       begin
-        RegEx.InputString := lines.Strings[i];
-        if RegEx.Exec then
+        if (RegEx.MatchPos[0] = 1) and (RegEx.MatchLen[0] > 10) then
         begin
-          if (RegEx.MatchPos[0] = 1) and (RegEx.MatchLen[0] > 10) then
-          begin
-            lines.Strings[i] := ReplaceRegExpr('　*', lines.Strings[i], '');
-          end;
+          lines.Strings[i] := ReplaceRegExpr('　*', lines.Strings[i], '');
         end;
       end;
-      body := lines.Text;
-    finally
-      lines.Free;
     end;
-    UTF8Delete(Page, 1, RegEx.MatchPos[0] + RegEx.MatchLen[0] - 1);
-  end else
-    Result := False;
+    body := lines.Text;
+  finally
+    lines.Free;
+  end;
+  UTF8Delete(Page, 1, RegEx.MatchPos[0] + RegEx.MatchLen[0] - 1);
   // 後書き
   footer := '';
   RegEx.Expression  := SATOGAKI;
@@ -534,8 +556,11 @@ begin
   TextPage.Add(AO_PB2);
   TextPage.Add('');
 
-  if Result = False then
+  if body = '' then
+  begin
     Writeln(sect + ' から本文を抽出出来ませんでした.');
+    Result := False;
+  end;
 end;
 
 // 各話URLリストをもとに各話ページを読み込んで本文を取り出す
@@ -915,6 +940,7 @@ begin
   end;
 
   Capter := '';
+
   TextLine := LoadFromHTML(URL);
   if TextLine <> '' then
   begin
