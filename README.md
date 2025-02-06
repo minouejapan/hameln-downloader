@@ -1,5 +1,6 @@
 # hameln-downloader
 ハーメルン小説テキストダウンローダー
+### これは旧版です。最新版はhameln-downloader2となります。
 
 ### 動作環境
 Windows10/11上のコマンドプロンプト上で動作します。
